@@ -3,7 +3,7 @@ import tensorflow as tf
 
 class SimpleLSTMCell(tf.contrib.rnn.RNNCell):
     """
-    The simpler version of LSTM cell with forget gate set to 1, referring to [1].
+    The simpler version of LSTM cell with forget gate set to 1, according to the paper.
     """
 
     def __init__(self, num_units, forget_bias=1.0, activation=tf.tanh, reuse=None):
@@ -32,7 +32,9 @@ class SimpleLSTMCell(tf.contrib.rnn.RNNCell):
                 self._bc = tf.get_variable('simple_lstm_cell_bc', dtype=tf.float32, shape=[self._num_units], initializer=tf.constant_initializer(0.0))
             i = tf.nn.sigmoid(tf.matmul(tf.concat([inputs, h], 1), self._wi) + self._bi)
             o = tf.nn.sigmoid(tf.matmul(tf.concat([inputs, h], 1), self._wo) + self._bo)
-            new_c = self._activation(tf.matmul(tf.concat([inputs, h], 1), self._wc) + self._bc)
+            _c = self._activation(tf.matmul(tf.concat([inputs, h], 1), self._wc) + self._bc)
+            # remove forget gate according to the paper
+            new_c = c + i * _c
             new_h = o * self._activation(new_c)
 
             return new_h, (new_c, new_h)
