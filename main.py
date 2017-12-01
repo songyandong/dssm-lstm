@@ -32,18 +32,29 @@ def load_data(path, fname):
     data = []
     with open('%s/%s' % (path, fname)) as f:
         for idx, line in enumerate(f):
-            tokens = line.split(' ')
+            line = line.strip('\n')
+            tokens = line.split()
             data.append(tokens)
     return data
 
 
 def build_vocab(path, data):
     print("Creating vocabulary...")
-    vocab_list = _START_VOCAB + chain.from_iterable(data)
+    words = set()
+    for line in data:
+        for word in line:
+            if len(word) == 0:
+                continue
+            words.add(word)
+    words = list(words)
+    vocab_list = _START_VOCAB + words
     FLAGS.symbols = len(vocab_list)
 
     print("Loading word vectors...")
     embed = np.random.normal(0.0, np.sqrt(1. / (FLAGS.embed_units)), [len(vocab_list), FLAGS.embed_units])
+    # debug
+    embed = np.array(embed, dtype=np.float32)
+    return vocab_list, embed
     with open(os.path.join(path, 'vector.txt')) as fp:
         while True:
             line = fp.readline()
@@ -61,27 +72,30 @@ def gen_batch_data(data):
     def padding(sent, l):
         return sent + ['_PAD'] * (l - len(sent))
 
-    max_len = max([len(item['text']) for item in data])
-    texts, texts_length = [], [], []
+    max_len = max([len(sentence) for sentence in data])
+    texts, texts_length = [], []
 
     for item in data:
-        texts.append(padding(item['text'], max_len))
-        texts_length.append(len(item['text']))
+        texts.append(padding(item, max_len))
+        texts_length.append(len(item))
 
-    batched_data = {'texts': np.array(texts), 'texts_length': texts_length}
+    batched_data = {'texts': np.array(texts), 'texts_length': np.array(texts_length, dtype=np.int32)}
 
     return batched_data
 
 
 def train(model, sess, queries, docs):
     st, ed, loss = 0, 0, .0
-    lq = len(queries)
+    lq = len(queries) / (FLAGS.neg_num + 1)
     while ed < lq:
         st, ed = ed, ed + FLAGS.batch_size if ed + FLAGS.batch_size < lq else lq
-        batch_queries = gen_batch_data(queries[st:ed])
+        batch_queries = gen_batch_data(queries[st*(FLAGS.neg_num + 1):ed*(FLAGS.neg_num + 1)])
+        batch_queries['texts'] = batch_queries['texts'][::FLAGS.neg_num + 1]
+        batch_queries['texts_length'] = batch_queries['texts_length'][::FLAGS.neg_num + 1]
         batch_docs = gen_batch_data(docs[st*(FLAGS.neg_num + 1):ed*(FLAGS.neg_num + 1)])
-        batch_docs['texts'] = batch_docs['texts'].reshape(lq, FLAGS.embed_units * (FLAGS.neg_num + 1))
-        batch_docs['texts_length'] = batch_docs['texts_length'].reshape(lq, FLAGS.embed_units * (FLAGS.neg_num + 1))
+        lbq = len(batch_queries['texts'])
+        batch_docs['texts'] = batch_docs['texts'].reshape(lbq*FLAGS.neg_num, FLAGS.neg_num + 1, -1)
+        batch_docs['texts_length'] = batch_docs['texts_length'].reshape(lbq*FLAGS.neg_num, FLAGS.neg_num + 1, -1)
         outputs = model.train_step(sess, batch_queries, batch_docs)
         loss += outputs[0]
     sess.run([model.epoch_add_op])
@@ -118,9 +132,10 @@ with tf.Session(config=config) as sess:
         total_train_time = 0.0
         while model.epoch.eval() < FLAGS.epoch:
             epoch = model.epoch.eval()
-            random_idxs = random.shuffle(range(len(data_queries)))
-            data_queries = data_queries[random_idxs]
-            data_docs = data_docs[random_idxs]
+            random_idxs = range(len(data_queries))
+            random.shuffle(random_idxs)
+            data_queries = [data_queries[i] for i in random_idxs]
+            data_docs = [data_docs[i] for i in random_idxs]
             start_time = time.time()
             loss, accuracy, summary = train(model, sess, data_queries, data_docs)
 

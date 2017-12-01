@@ -22,8 +22,8 @@ class LSTMDSSM(object):
                  gradient_clip_threshold=5.0):
         self.queries = tf.placeholder(dtype=tf.string, shape=[None, None])  # shape: batch*len
         self.queries_length = tf.placeholder(dtype=tf.int32, shape=[None])  # shape: batch
-        self.docs = tf.placeholder(dtype=tf.string, shape=[neg_num + 1, None, None])  # shape: batch*(neg_num + 1)*len
-        self.docs_length = tf.placeholder(dtype=tf.int32, shape=[neg_num + 1, None])  # shape: batch*(neg_num + 1)
+        self.docs = tf.placeholder(dtype=tf.string, shape=[None, neg_num + 1, None])  # shape: batch*(neg_num + 1)*len
+        self.docs_length = tf.placeholder(dtype=tf.int32, shape=[None, neg_num + 1])  # shape: batch*(neg_num + 1)
         self.docs = tf.transpose(self.docs, [1, 0, 2])  # shape: (neg_num + 1)*batch*len
         self.docs_length = tf.transpose(self.docs_length)  # shape: batch*(neg_num + 1)
 
@@ -43,7 +43,7 @@ class LSTMDSSM(object):
         self.momentum = tf.Variable(0.9, trainable=False, dtype=tf.float32)
 
         self.index_queries = self.word2index.lookup(self.queries)  # batch*len
-        self.index_docs = [self.word2index.lookup(doc) for doc in self.docs]
+        self.index_docs = [self.word2index.lookup(doc) for doc in tf.unstack(self.docs)]
 
         self.embed = tf.get_variable('embed', dtype=tf.float32, initializer=embed)
         self.embed_queries = tf.nn.embedding_lookup(self.embed, self.index_queries)
@@ -54,15 +54,15 @@ class LSTMDSSM(object):
         with tf.variable_scope('doc_lstm'):
             self.cell_d = SimpleLSTMCell(num_lstm_units)
 
-        outputs_q, states_q = dynamic_rnn(self.cell_q, self.embed_queries, self.queries_length, dtype=tf.float32,
-                                         scope="simple_lstm_cell_query")  # shape: batch*num_units
+        states_q = dynamic_rnn(self.cell_q, self.embed_queries, self.queries_length, dtype=tf.float32,
+                                         scope="simple_lstm_cell_query")[1][1]  # shape: batch*num_units
         states_d = [dynamic_rnn(self.cell_d, self.embed_docs[i], self.docs_length[i], dtype=tf.float32,
-                                            scope="simple_lstm_cell_doc")[1] for i in range(neg_num + 1)]  # shape: (neg_num + 1)*batch*num_units
+                                            scope="simple_lstm_cell_doc")[1][1] for i in range(neg_num + 1)]  # shape: (neg_num + 1)*batch*num_units
         queries_norm = tf.reduce_sum(states_q, axis=1)
         docs_norm = [tf.reduce_sum(states_d[i], axis=1) for i in range(neg_num + 1)]
         prods = [tf.reduce_sum(tf.multiply(states_q, states_d[i]), axis=1) for i in range(neg_num + 1)]
-        sims = [(prods[i] / (queries_norm * docs_norm)) for i in range(neg_num + 1)]  # shape: (neg_num + 1)*batch
-        sims = tf.convert_to_tensor(sims).transpose()  # shape: batch*(neg_num + 1)
+        sims = [(prods[i] / (queries_norm * docs_norm[i])) for i in range(neg_num + 1)]  # shape: (neg_num + 1)*batch
+        sims = tf.transpose(tf.convert_to_tensor(sims))  # shape: batch*(neg_num + 1)
         self.gamma = tf.Variable(initial_value=1.0, expected_shape=[], dtype=tf.float32)  # scaling factor according to the paper
         sims = sims * self.gamma
         prob = tf.nn.softmax(sims)

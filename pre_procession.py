@@ -1,11 +1,17 @@
 import os
 import csv
+import random
+import nltk
+from nltk import word_tokenize
+nltk.download('punkt')
 
 data_dir = './data'
 
 
 def analyze_dataset():
     idxs = {}
+    # debug
+    iter = 0
     with open(os.path.join(data_dir, 'all.csv'), 'r') as f:
         reader = csv.reader(f)
         for row in reader:
@@ -13,9 +19,58 @@ def analyze_dataset():
                 idxs[int(row[1])] = [int(row[2])]
             else:
                 idxs[int(row[1])].append(int(row[2]))
+            # debug
+            iter += 1
+            print("No.%d" % iter)
+    # debug
+    print("Finished reading. Wtring...")
     with open(os.path.join(data_dir, 'dataset_info.txt'), 'w') as f:
-        for idx, sims in idxs:
-            f.write('same to' + str(idx) + ': ' + ','.join(sims) + '\n')
+        for idx, values in idxs.iteritems():
+            f.write('similar to ' + str(idx) + ': ' + ','.join(str(v) for v in values) + '\n')
+
+
+def create_dataset():
+    lines = []
+    with open(os.path.join(data_dir, 'all.csv'), 'r') as f:
+        reader = csv.reader(f)
+        for line in reader:
+            if int(line[5]) != 1:
+                continue
+            lines.append(line)
+
+    query_num = 10000
+    neg_num = 4
+    random.shuffle(lines)
+    lines = lines[:query_num]
+
+    queries = []
+    docs = []
+    idxs = {}
+    for line in lines:
+        idx1 = int(line[1])
+        idx2 = int(line[2])
+        if idx1 not in idxs.keys():
+            idxs[idx1] = [idx2]
+        else:
+            idxs[idx1].append(idx2)
+        queries.append(' '.join(word_tokenize(line[3])) + '\n')
+        docs.append(' '.join(word_tokenize(line[4])) + '\n')
+        negs_count = 0
+        while negs_count < neg_num:
+            rand_idx = random.randint(0, query_num - 1)
+            candidate = lines[rand_idx]
+            i1 = int(candidate[1])
+            i2 = int(candidate[2])
+            if i1 == idx1 or i2 == idx1 or i1 in idxs[idx1] or i2 in idxs[idx1]:
+                continue
+            queries.append(' '.join(word_tokenize(line[3])) + '\n')
+            docs.append(' '.join(word_tokenize(candidate[3])) + '\n')
+            negs_count += 1
+    with open(os.path.join(data_dir, 'queries.txt'), 'w') as f:
+        f.writelines(queries)
+    with open(os.path.join(data_dir, 'docs.txt'), 'w') as f:
+        f.writelines(docs)
+
 
 if __name__ == '__main__':
-    analyze_dataset()
+    create_dataset()
