@@ -31,16 +31,20 @@ def analyze_dataset():
 
 def create_dataset():
     lines = []
+    dis_similar = []
     with open(os.path.join(data_dir, 'all.csv'), 'r') as f:
         reader = csv.reader(f)
         for line in reader:
             if int(line[5]) != 1:
-                continue
-            lines.append(line)
+                dis_similar.append(line)
+            else:
+                lines.append(line)
 
     query_num = 10000
     neg_num = 4
+    test_num = 2500
     random.shuffle(lines)
+    test_lines = lines[query_num:int(query_num + test_num / 2)]
     lines = lines[:query_num]
 
     queries = []
@@ -63,13 +67,19 @@ def create_dataset():
             i2 = int(candidate[2])
             if i1 == idx1 or i2 == idx1 or i1 in idxs[idx1] or i2 in idxs[idx1]:
                 continue
-            queries.append(' '.join(word_tokenize(line[3])) + '\n')
             docs.append(' '.join(word_tokenize(candidate[3])) + '\n')
             negs_count += 1
     with open(os.path.join(data_dir, 'queries.txt'), 'w') as f:
         f.writelines(queries)
     with open(os.path.join(data_dir, 'docs.txt'), 'w') as f:
         f.writelines(docs)
+
+    random.shuffle(dis_similar)
+    test_lines = test_lines + dis_similar[:int(test_num / 2)]
+
+    with open(os.path.join(data_dir, 'test.csv'), 'w') as f:
+        writer = csv.writer(f)
+        writer.writerows(test_lines)
 
 
 if __name__ == '__main__':

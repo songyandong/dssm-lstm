@@ -22,10 +22,10 @@ class LSTMDSSM(object):
                  gradient_clip_threshold=5.0):
         self.queries = tf.placeholder(dtype=tf.string, shape=[None, None])  # shape: batch*len
         self.queries_length = tf.placeholder(dtype=tf.int32, shape=[None])  # shape: batch
-        self.docs = tf.placeholder(dtype=tf.string, shape=[None, neg_num + 1, None])  # shape: batch*(neg_num + 1)*len
-        self.docs_length = tf.placeholder(dtype=tf.int32, shape=[None, neg_num + 1])  # shape: batch*(neg_num + 1)
-        self.docs = tf.transpose(self.docs, [1, 0, 2])  # shape: (neg_num + 1)*batch*len
-        self.docs_length = tf.transpose(self.docs_length)  # shape: batch*(neg_num + 1)
+        self._docs = tf.placeholder(dtype=tf.string, shape=[None, neg_num + 1, None])  # shape: batch*(neg_num + 1)*len
+        self._docs_length = tf.placeholder(dtype=tf.int32, shape=[None, neg_num + 1])  # shape: batch*(neg_num + 1)
+        self.docs = tf.transpose(self._docs, [1, 0, 2])  # shape: (neg_num + 1)*batch*len
+        self.docs_length = tf.transpose(self._docs_length)  # shape: batch*(neg_num + 1)
 
         self.word2index = MutableHashTable(
             key_dtype=tf.string,
@@ -54,20 +54,20 @@ class LSTMDSSM(object):
         with tf.variable_scope('doc_lstm'):
             self.cell_d = SimpleLSTMCell(num_lstm_units)
 
-        states_q = dynamic_rnn(self.cell_q, self.embed_queries, self.queries_length, dtype=tf.float32,
+        self.states_q = dynamic_rnn(self.cell_q, self.embed_queries, self.queries_length, dtype=tf.float32,
                                          scope="simple_lstm_cell_query")[1][1]  # shape: batch*num_units
-        states_d = [dynamic_rnn(self.cell_d, self.embed_docs[i], self.docs_length[i], dtype=tf.float32,
+        self.states_d = [dynamic_rnn(self.cell_d, self.embed_docs[i], self.docs_length[i], dtype=tf.float32,
                                             scope="simple_lstm_cell_doc")[1][1] for i in range(neg_num + 1)]  # shape: (neg_num + 1)*batch*num_units
-        queries_norm = tf.reduce_sum(states_q, axis=1)
-        docs_norm = [tf.reduce_sum(states_d[i], axis=1) for i in range(neg_num + 1)]
-        prods = [tf.reduce_sum(tf.multiply(states_q, states_d[i]), axis=1) for i in range(neg_num + 1)]
-        sims = [(prods[i] / (queries_norm * docs_norm[i])) for i in range(neg_num + 1)]  # shape: (neg_num + 1)*batch
-        sims = tf.transpose(tf.convert_to_tensor(sims))  # shape: batch*(neg_num + 1)
+        self.queries_norm = tf.reduce_sum(self.states_q, axis=1)
+        self.docs_norm = [tf.reduce_sum(self.states_d[i], axis=1) for i in range(neg_num + 1)]
+        self.prods = [tf.reduce_sum(tf.multiply(self.states_q, self.states_d[i]), axis=1) for i in range(neg_num + 1)]
+        self.sims = [(self.prods[i] / (self.queries_norm * self.docs_norm[i])) for i in range(neg_num + 1)]  # shape: (neg_num + 1)*batch
+        self.sims = tf.transpose(tf.convert_to_tensor(self.sims))  # shape: batch*(neg_num + 1)
         self.gamma = tf.Variable(initial_value=1.0, expected_shape=[], dtype=tf.float32)  # scaling factor according to the paper
-        sims = sims * self.gamma
-        prob = tf.nn.softmax(sims)
-        hit_prob = tf.slice(prob, [0, 0], [-1, 1])
-        self.loss = -tf.reduce_mean(tf.log(hit_prob))
+        self.sims = self.sims * self.gamma
+        self.prob = tf.nn.softmax(self.sims)
+        self.hit_prob = tf.slice(self.prob, [0, 0], [-1, 1])
+        self.loss = -tf.reduce_mean(tf.log(self.hit_prob))
 
         self.params = tf.trainable_variables()
         opt = tf.train.MomentumOptimizer(learning_rate=self.learning_rate, momentum=self.momentum, use_nesterov=True)  # use Nesterov's method, according to the paper
@@ -84,7 +84,8 @@ class LSTMDSSM(object):
     def train_step(self, session, queries, docs):
         input_feed = {self.queries: queries['texts'],
                       self.queries_length: queries['texts_length'],
-                      self.docs: docs['texts'],
-                      self.docs_length: docs['texts_length']}
-        output_feed = [self.loss, self.gradient_norm, self.update]
+                      self._docs: docs['texts'],
+                      self._docs_length: docs['texts_length']}
+
+        output_feed = [self.loss, self.update, self.states_q, self.states_d, self.queries_norm, self.docs_norm, self.prods, self.sims, self.gamma, self.prob, self.hit_prob]
         return session.run(output_feed, input_feed)

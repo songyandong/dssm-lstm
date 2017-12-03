@@ -7,6 +7,7 @@ import time
 import random
 from itertools import chain
 import os
+import math
 from model import LSTMDSSM, _START_VOCAB
 
 random.seed(1229)
@@ -89,14 +90,14 @@ def train(model, sess, queries, docs):
     lq = len(queries) / (FLAGS.neg_num + 1)
     while ed < lq:
         st, ed = ed, ed + FLAGS.batch_size if ed + FLAGS.batch_size < lq else lq
-        batch_queries = gen_batch_data(queries[st*(FLAGS.neg_num + 1):ed*(FLAGS.neg_num + 1)])
-        batch_queries['texts'] = batch_queries['texts'][::FLAGS.neg_num + 1]
-        batch_queries['texts_length'] = batch_queries['texts_length'][::FLAGS.neg_num + 1]
+        batch_queries = gen_batch_data(queries[st:ed])
         batch_docs = gen_batch_data(docs[st*(FLAGS.neg_num + 1):ed*(FLAGS.neg_num + 1)])
         lbq = len(batch_queries['texts'])
-        batch_docs['texts'] = batch_docs['texts'].reshape(lbq*FLAGS.neg_num, FLAGS.neg_num + 1, -1)
-        batch_docs['texts_length'] = batch_docs['texts_length'].reshape(lbq*FLAGS.neg_num, FLAGS.neg_num + 1, -1)
+        batch_docs['texts'] = batch_docs['texts'].reshape(lbq, FLAGS.neg_num + 1, -1)
+        batch_docs['texts_length'] = batch_docs['texts_length'].reshape(lbq, FLAGS.neg_num + 1)
         outputs = model.train_step(sess, batch_queries, batch_docs)
+        if math.isnan(outputs[0]) or math.isinf(outputs[0]):
+            print('nan/inf detected. ')
         loss += outputs[0]
     sess.run([model.epoch_add_op])
 
@@ -135,22 +136,22 @@ with tf.Session(config=config) as sess:
             random_idxs = range(len(data_queries))
             random.shuffle(random_idxs)
             data_queries = [data_queries[i] for i in random_idxs]
+            data_docs = np.reshape(data_docs, (len(data_queries), -1))
             data_docs = [data_docs[i] for i in random_idxs]
+            data_docs = np.reshape(data_docs, len(data_queries) * (FLAGS.neg_num + 1))
             start_time = time.time()
-            loss, accuracy, summary = train(model, sess, data_queries, data_docs)
+            loss = train(model, sess, data_queries, data_docs)
 
             epoch_time = time.time() - start_time
             total_train_time += epoch_time
 
-            summary_writer.add_summary(summary, epoch)
             summary = tf.Summary()
             summary.value.add(tag='loss/train', simple_value=loss)
-            summary.value.add(tag='accuracy/train', simple_value=accuracy)
             cur_lr = model.learning_rate.eval()
             summary.value.add(tag='lr/train', simple_value=cur_lr)
             summary_writer.add_summary(summary, epoch)
             model.saver.save(sess, '%s/checkpoint' % FLAGS.train_dir, global_step=model.global_step)
-            print("epoch %d learning rate %.10f epoch-time %.4f loss %.8f accuracy [%.8f]" % (
-            epoch, cur_lr, epoch_time, loss, accuracy))
+            print("epoch %d learning rate %.10f epoch-time %.4f loss %.8f" % (
+            epoch, cur_lr, epoch_time, loss))
         with open(os.path.join(FLAGS.train_dir, FLAGS.time_log_path), 'a') as fp:
             fp.writelines(['total training time: %f' % total_train_time])
