@@ -54,8 +54,8 @@ def build_vocab(path, data):
     print("Loading word vectors...")
     embed = np.random.normal(0.0, np.sqrt(1. / (FLAGS.embed_units)), [len(vocab_list), FLAGS.embed_units])
     # debug
-    embed = np.array(embed, dtype=np.float32)
-    return vocab_list, embed
+    # embed = np.array(embed, dtype=np.float32)
+    # return vocab_list, embed
     with open(os.path.join(path, 'vector.txt')) as fp:
         while True:
             line = fp.readline()
