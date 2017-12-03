@@ -115,7 +115,8 @@ with tf.Session(config=config) as sess:
 
         model = LSTMDSSM(
             FLAGS.units,
-            embed)
+            embed,
+            FLAGS.neg_num)
         if FLAGS.log_parameters:
             model.print_parameters()
 
